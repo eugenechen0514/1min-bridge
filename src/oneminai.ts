@@ -1,5 +1,17 @@
 // 1min.ai API client — chat (non-streaming) & SSE streaming
 
+const DEBUG = process.env.DEBUG === '1' || process.env.DEBUG === 'true'
+
+function debug(label: string, data?: unknown) {
+  if (!DEBUG) return
+  const ts = new Date().toISOString().slice(11, 23)
+  if (data !== undefined) {
+    console.log(`[${ts}] [1min.ai] ${label}`, typeof data === 'string' ? data : JSON.stringify(data, null, 2))
+  } else {
+    console.log(`[${ts}] [1min.ai] ${label}`)
+  }
+}
+
 // ── Types ──────────────────────────────────────────────
 
 export interface OneMinAiRequest {
@@ -26,6 +38,9 @@ function headers(apiKey: string) {
 // ── Non-streaming ─────────────────────────────────────
 
 export async function chatWithAi(body: OneMinAiRequest, apiKey: string): Promise<any> {
+  debug('→ POST', { model: body.model, prompt: body.promptObject.prompt.slice(0, 100) })
+  debug('→ body', body)
+
   const res = await fetch(BASE_URL, {
     method: 'POST',
     headers: headers(apiKey),
@@ -34,10 +49,13 @@ export async function chatWithAi(body: OneMinAiRequest, apiKey: string): Promise
 
   if (!res.ok) {
     const message = await res.text()
+    debug(`← ${res.status} ERROR`, message)
     throw { status: res.status, message }
   }
 
-  return res.json()
+  const data = await res.json()
+  debug(`← ${res.status} OK`, data)
+  return data
 }
 
 // ── Streaming (SSE) ───────────────────────────────────
@@ -46,6 +64,9 @@ export async function* chatWithAiStream(
   body: OneMinAiRequest,
   apiKey: string,
 ): AsyncGenerator<{ event: string; data: string }> {
+  debug('→ POST (stream)', { model: body.model, prompt: body.promptObject.prompt.slice(0, 100) })
+  debug('→ body', body)
+
   const res = await fetch(`${BASE_URL}?isStreaming=true`, {
     method: 'POST',
     headers: headers(apiKey),
@@ -54,8 +75,11 @@ export async function* chatWithAiStream(
 
   if (!res.ok) {
     const message = await res.text()
+    debug(`← ${res.status} ERROR (stream)`, message)
     throw { status: res.status, message }
   }
+
+  debug(`← ${res.status} OK (stream started)`)
 
   const reader = res.body!.getReader()
   const decoder = new TextDecoder()
@@ -81,6 +105,7 @@ export async function* chatWithAiStream(
       } else if (line === '') {
         // Empty line = SSE delimiter
         if (currentEvent && currentData) {
+          debug(`← SSE [${currentEvent}]`, currentData.slice(0, 200))
           yield { event: currentEvent, data: currentData }
           currentEvent = ''
           currentData = ''

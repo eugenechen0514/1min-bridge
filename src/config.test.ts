@@ -32,12 +32,12 @@ describe('getModelList', () => {
 })
 
 describe('getApiKey', () => {
-  it('prefers header over env', () => {
-    expect(getApiKey('header-key', 'env-key')).toBe('header-key')
+  it('prefers env over header', () => {
+    expect(getApiKey('header-key', 'env-key')).toBe('env-key')
   })
 
-  it('falls back to env when no header', () => {
-    expect(getApiKey(undefined, 'env-key')).toBe('env-key')
+  it('falls back to header when no env', () => {
+    expect(getApiKey('header-key', undefined)).toBe('header-key')
   })
 
   it('returns undefined when neither set', () => {

@@ -102,7 +102,7 @@ export function getModelList(mapping: Record<string, string>): ModelInfo[] {
 }
 
 export function getApiKey(headerKey?: string, envKey?: string): string | undefined {
-  return headerKey ?? envKey
+  return envKey ?? headerKey
 }
 
 export const config = {
