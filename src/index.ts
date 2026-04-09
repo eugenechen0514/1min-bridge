@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import { serve } from '@hono/node-server'
 import { config, getModelList, resolveModelName, getApiKey } from './config.js'
-import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse } from './transform.js'
-import { chatWithAi } from './oneminai.js'
+import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk } from './transform.js'
+import { chatWithAi, chatWithAiStream } from './oneminai.js'
 
 const app = new Hono()
 
@@ -54,10 +55,25 @@ app.post('/v1/chat/completions', async (c) => {
   const webSearch = extractWebSearch(body.web_search_options)
   const oneMinReq = toOneMinAiRequest({ model, prompt, images, webSearch })
 
-  // 5. Handle non-streaming only (streaming will be added in Task 7)
+  // 5. Handle streaming
   if (body.stream) {
-    // Placeholder — will be implemented in Task 7
-    return c.json({ error: { message: 'Streaming not yet implemented', type: 'server_error' } }, 501)
+    return streamSSE(c, async (stream) => {
+      try {
+        for await (const { event, data } of chatWithAiStream(oneMinReq, apiKey)) {
+          if (event === 'content') {
+            const parsed = JSON.parse(data)
+            const chunk = toOpenAiStreamChunk(parsed.content, model)
+            await stream.writeSSE({ data: JSON.stringify(chunk) })
+          } else if (event === 'done') {
+            await stream.writeSSE({ data: '[DONE]' })
+          } else if (event === 'error') {
+            await stream.writeSSE({ data: JSON.stringify({ error: { message: data } }) })
+          }
+        }
+      } catch (err: any) {
+        await stream.writeSSE({ data: JSON.stringify({ error: { message: err.message || 'Upstream error' } }) })
+      }
+    })
   }
 
   // 6. Call 1min.ai API
