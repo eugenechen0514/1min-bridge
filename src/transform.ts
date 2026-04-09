@@ -87,7 +87,11 @@ export function extractWebSearch(webSearchOptions: unknown): boolean {
 }
 
 export function toOneMinAiRequest({ model, prompt, images, webSearch }: OneMinAiRequestInput) {
-  const promptObject: Record<string, unknown> = { prompt }
+  const promptObject: {
+    prompt: string
+    attachments?: { images: string[] }
+    settings?: { webSearchSettings: { webSearch: boolean } }
+  } = { prompt }
 
   if (images.length > 0) {
     promptObject.attachments = { images }
