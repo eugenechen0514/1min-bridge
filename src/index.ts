@@ -200,7 +200,18 @@ app.post('/api/generate', async (c) => {
 })
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`1min.ai relay server running on http://localhost:${info.port}`)
+  const models = getModelList(config.modelMapping)
+  const aliasCount = Object.keys(config.modelMapping).length
+
+  console.log('')
+  console.log('  1min.ai Relay Server')
+  console.log('  ────────────────────────────────────────')
+  console.log(`  OpenAI:  http://localhost:${info.port}/v1/chat/completions`)
+  console.log(`  Ollama:  http://localhost:${info.port}/api/chat`)
+  console.log(`  Models:  ${models.length} loaded${aliasCount > 0 ? ` (${aliasCount} aliases)` : ''}`)
+  console.log(`  API Key: ${config.apiKey ? 'from env ✓' : 'not set (pass via Bearer token)'}`)
+  console.log('  ────────────────────────────────────────')
+  console.log('')
 })
 
 export default app
