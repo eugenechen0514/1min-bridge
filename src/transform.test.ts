@@ -18,6 +18,7 @@ import {
   anthropicMessagesToPrompt,
   anthropicToolsToPrompt,
   toAnthropicPrompt,
+  extractAnthropicImages,
   parseAnthropicResponse,
   toAnthropicResponse,
   anthropicStreamEvents,
@@ -305,6 +306,55 @@ describe('responsesStreamEvents', () => {
 
 // ── Anthropic Messages API ───────────────────────────
 
+describe('extractAnthropicImages', () => {
+  it('returns empty array for string content', () => {
+    const messages = [{ role: 'user', content: 'Hello' }]
+    expect(extractAnthropicImages(messages)).toEqual([])
+  })
+
+  it('extracts URL-based images', () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'What is this?' },
+        { type: 'image', source: { type: 'url', url: 'https://example.com/img.png' } },
+      ],
+    }]
+    expect(extractAnthropicImages(messages)).toEqual([
+      { type: 'url', url: 'https://example.com/img.png' },
+    ])
+  })
+
+  it('extracts base64 images with media type', () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Describe' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBOR' } },
+      ],
+    }]
+    expect(extractAnthropicImages(messages)).toEqual([
+      { type: 'base64', media_type: 'image/png', data: 'iVBOR' },
+    ])
+  })
+
+  it('extracts multiple images from multiple messages', () => {
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'url', url: 'https://example.com/1.png' } },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'abc123' } },
+        ],
+      },
+    ]
+    expect(extractAnthropicImages(messages)).toEqual([
+      { type: 'url', url: 'https://example.com/1.png' },
+      { type: 'base64', media_type: 'image/jpeg', data: 'abc123' },
+    ])
+  })
+})
+
 describe('anthropicMessagesToPrompt', () => {
   it('converts single user message', () => {
     const messages = [{ role: 'user', content: 'Hello' }]
@@ -405,6 +455,18 @@ describe('toAnthropicPrompt', () => {
       messages: [{ role: 'user', content: 'Hello' }],
     })
     expect(result).toBe('Hello')
+  })
+
+  it('handles system as array of content blocks', () => {
+    const result = toAnthropicPrompt({
+      system: [
+        { type: 'text', text: 'You are helpful.' },
+        { type: 'text', text: 'Be concise.' },
+      ],
+      messages: [{ role: 'user', content: 'Hello' }],
+    })
+    expect(result).toContain('[System] You are helpful.\nBe concise.')
+    expect(result).toContain('[User] Hello')
   })
 
   it('builds prompt with system and tools', () => {

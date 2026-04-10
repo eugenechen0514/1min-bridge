@@ -35,6 +35,44 @@ function headers(apiKey: string) {
   }
 }
 
+// ── Asset upload ──────────────────────────────────────
+
+const ASSET_URL = 'https://api.1min.ai/api/assets'
+
+export async function uploadImageAsset(
+  base64Data: string,
+  mediaType: string,
+  apiKey: string,
+): Promise<string> {
+  const ext = mediaType.split('/')[1] || 'png'
+  const fileName = `upload_${Date.now()}.${ext}`
+
+  const binary = Buffer.from(base64Data, 'base64')
+  const blob = new Blob([binary], { type: mediaType })
+
+  const form = new FormData()
+  form.append('asset', blob, fileName)
+
+  debug('→ POST asset upload', { fileName, size: binary.length })
+
+  const res = await fetch(ASSET_URL, {
+    method: 'POST',
+    headers: { 'API-KEY': apiKey },
+    body: form,
+  })
+
+  if (!res.ok) {
+    const message = await res.text()
+    debug(`← ${res.status} asset upload ERROR`, message)
+    throw { status: res.status, message }
+  }
+
+  const data: any = await res.json()
+  const key = data?.asset?.key ?? data?.fileContent?.path
+  debug('← asset upload OK', { key })
+  return key
+}
+
 // ── Non-streaming ─────────────────────────────────────
 
 export async function chatWithAi(body: OneMinAiRequest, apiKey: string): Promise<any> {

@@ -122,14 +122,48 @@ export function anthropicToolsToPrompt(tools?: any[]): string {
   ].join('\n')
 }
 
+function normalizeSystem(system?: string | any[]): string | undefined {
+  if (!system) return undefined
+  if (typeof system === 'string') return system
+  // system can be an array of content blocks: [{type:"text",text:"..."},...]
+  return system
+    .map((b: any) => (typeof b === 'string' ? b : b.text ?? ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
 export function toAnthropicPrompt(body: {
   messages: { role: string; content: string | any[] }[]
-  system?: string
+  system?: string | any[]
   tools?: any[]
 }): string {
   const toolPrompt = anthropicToolsToPrompt(body.tools)
-  const systemParts = [body.system, toolPrompt].filter(Boolean).join('\n\n')
+  const sys = normalizeSystem(body.system)
+  const systemParts = [sys, toolPrompt].filter(Boolean).join('\n\n')
   return anthropicMessagesToPrompt(body.messages, systemParts || undefined)
+}
+
+export type AnthropicImage =
+  | { type: 'url'; url: string }
+  | { type: 'base64'; media_type: string; data: string }
+
+export function extractAnthropicImages(
+  messages: { role: string; content: string | any[] }[],
+): AnthropicImage[] {
+  const images: AnthropicImage[] = []
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue
+    for (const block of msg.content) {
+      if (block.type !== 'image') continue
+      const src = block.source
+      if (src?.type === 'url') {
+        images.push({ type: 'url', url: src.url })
+      } else if (src?.type === 'base64') {
+        images.push({ type: 'base64', media_type: src.media_type, data: src.data })
+      }
+    }
+  }
+  return images
 }
 
 export function extractImages(messages: Message[]): string[] {

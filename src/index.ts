@@ -3,8 +3,8 @@ import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { serve } from '@hono/node-server'
 import { config, getModelList, resolveModelName, getApiKey } from './config.js'
-import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse, toAnthropicModelList, toAnthropicModelInfo } from './transform.js'
-import { chatWithAi, chatWithAiStream } from './oneminai.js'
+import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, extractAnthropicImages, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse, toAnthropicModelList, toAnthropicModelInfo } from './transform.js'
+import { chatWithAi, chatWithAiStream, uploadImageAsset } from './oneminai.js'
 
 const app = new Hono()
 
@@ -311,7 +311,13 @@ app.post('/anthropic/v1/messages', async (c) => {
 
   const model = resolveModelName(body.model, config.modelMapping)
   const prompt = toAnthropicPrompt(body)
-  const oneMinReq = toOneMinAiRequest({ model, prompt, images: [], webSearch: false })
+  const rawImages = extractAnthropicImages(body.messages ?? [])
+  const images = await Promise.all(
+    rawImages.map((img) =>
+      img.type === 'url' ? img.url : uploadImageAsset(img.data, img.media_type, apiKey),
+    ),
+  )
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images, webSearch: false })
 
   // Streaming
   if (body.stream) {
