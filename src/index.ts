@@ -26,6 +26,9 @@ app.use('/anthropic/*', async (c, next) => {
 // GET /health
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
+// HEAD /anthropic — health check for Claude Code CLI
+app.on('HEAD', '/anthropic', (c) => c.body(null, 200))
+
 // GET /v1/models — OpenAI format
 app.get('/v1/models', (c) => {
   const models = getModelList(config.modelMapping)
