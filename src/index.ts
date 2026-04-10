@@ -14,6 +14,15 @@ app.use('*', cors({
   allowHeaders: ['*'],
 }))
 
+// Log unmatched /anthropic routes for debugging
+app.use('/anthropic/*', async (c, next) => {
+  const start = Date.now()
+  await next()
+  if (c.res.status === 404) {
+    console.log(`[unmatched] ${c.req.method} ${c.req.path}`)
+  }
+})
+
 // GET /health
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
@@ -291,55 +300,58 @@ app.post('/anthropic/v1/messages', async (c) => {
 
   // Streaming
   if (body.stream) {
+    const hasTools = body.tools && body.tools.length > 0
+
     return streamSSE(c, async (stream) => {
       const events = anthropicStreamEvents(model)
       let fullText = ''
-      let firstChunk = true
-      let isBuffering = false
 
       try {
         await stream.writeSSE({ event: events.messageStart().event, data: JSON.stringify(events.messageStart().data) })
         await stream.writeSSE({ event: events.ping().event, data: JSON.stringify(events.ping().data) })
 
-        for await (const { event, data } of chatWithAiStream(oneMinReq, apiKey)) {
-          if (event === 'content') {
-            const parsed = JSON.parse(data)
-            const chunk = parsed.content
-
-            if (firstChunk) {
-              firstChunk = false
-              if (chunk.trimStart().startsWith('{')) {
-                isBuffering = true
-              } else {
-                await stream.writeSSE({ event: events.contentBlockStart(0, 'text').event, data: JSON.stringify(events.contentBlockStart(0, 'text').data) })
-              }
-            }
-
-            fullText += chunk
-
-            if (!isBuffering) {
-              await stream.writeSSE({ event: events.textDelta(0, chunk).event, data: JSON.stringify(events.textDelta(0, chunk).data) })
-            }
-          } else if (event === 'done') {
-            if (isBuffering) {
+        if (hasTools) {
+          // When tools are present, buffer everything then parse at the end.
+          // Tool call responses can mix text + JSON, so we can't stream incrementally.
+          for await (const { event, data } of chatWithAiStream(oneMinReq, apiKey)) {
+            if (event === 'content') {
+              const parsed = JSON.parse(data)
+              fullText += parsed.content
+            } else if (event === 'done') {
               const result = parseAnthropicResponse(fullText)
-              if (result.type === 'tool_use') {
-                const toolBlock = result.content.find((b: any) => b.type === 'tool_use')
-                await stream.writeSSE({ event: events.contentBlockStart(0, 'tool_use', { id: toolBlock.id, name: toolBlock.name }).event, data: JSON.stringify(events.contentBlockStart(0, 'tool_use', { id: toolBlock.id, name: toolBlock.name }).data) })
-                await stream.writeSSE({ event: events.inputJsonDelta(0, JSON.stringify(toolBlock.input)).event, data: JSON.stringify(events.inputJsonDelta(0, JSON.stringify(toolBlock.input)).data) })
-                await stream.writeSSE({ event: events.contentBlockStop(0).event, data: JSON.stringify(events.contentBlockStop(0).data) })
-                await stream.writeSSE({ event: events.messageDelta('tool_use').event, data: JSON.stringify(events.messageDelta('tool_use').data) })
-              } else {
-                await stream.writeSSE({ event: events.contentBlockStart(0, 'text').event, data: JSON.stringify(events.contentBlockStart(0, 'text').data) })
-                await stream.writeSSE({ event: events.textDelta(0, fullText).event, data: JSON.stringify(events.textDelta(0, fullText).data) })
-                await stream.writeSSE({ event: events.contentBlockStop(0).event, data: JSON.stringify(events.contentBlockStop(0).data) })
-                await stream.writeSSE({ event: events.messageDelta('end_turn').event, data: JSON.stringify(events.messageDelta('end_turn').data) })
+              let blockIndex = 0
+              for (const block of result.content) {
+                if (block.type === 'text') {
+                  await stream.writeSSE({ event: events.contentBlockStart(blockIndex, 'text').event, data: JSON.stringify(events.contentBlockStart(blockIndex, 'text').data) })
+                  await stream.writeSSE({ event: events.textDelta(blockIndex, block.text).event, data: JSON.stringify(events.textDelta(blockIndex, block.text).data) })
+                  await stream.writeSSE({ event: events.contentBlockStop(blockIndex).event, data: JSON.stringify(events.contentBlockStop(blockIndex).data) })
+                } else if (block.type === 'tool_use') {
+                  await stream.writeSSE({ event: events.contentBlockStart(blockIndex, 'tool_use', { id: block.id, name: block.name }).event, data: JSON.stringify(events.contentBlockStart(blockIndex, 'tool_use', { id: block.id, name: block.name }).data) })
+                  await stream.writeSSE({ event: events.inputJsonDelta(blockIndex, JSON.stringify(block.input)).event, data: JSON.stringify(events.inputJsonDelta(blockIndex, JSON.stringify(block.input)).data) })
+                  await stream.writeSSE({ event: events.contentBlockStop(blockIndex).event, data: JSON.stringify(events.contentBlockStop(blockIndex).data) })
+                }
+                blockIndex++
               }
-            } else {
+              await stream.writeSSE({ event: events.messageDelta(result.stop_reason).event, data: JSON.stringify(events.messageDelta(result.stop_reason).data) })
+              await stream.writeSSE({ event: events.messageStop().event, data: JSON.stringify(events.messageStop().data) })
+            }
+          }
+        } else {
+          // No tools — stream text deltas in real-time
+          let started = false
+          for await (const { event, data } of chatWithAiStream(oneMinReq, apiKey)) {
+            if (event === 'content') {
+              const parsed = JSON.parse(data)
+              if (!started) {
+                started = true
+                await stream.writeSSE({ event: events.contentBlockStart(0, 'text').event, data: JSON.stringify(events.contentBlockStart(0, 'text').data) })
+              }
+              await stream.writeSSE({ event: events.textDelta(0, parsed.content).event, data: JSON.stringify(events.textDelta(0, parsed.content).data) })
+            } else if (event === 'done') {
               await stream.writeSSE({ event: events.contentBlockStop(0).event, data: JSON.stringify(events.contentBlockStop(0).data) })
               await stream.writeSSE({ event: events.messageDelta('end_turn').event, data: JSON.stringify(events.messageDelta('end_turn').data) })
+              await stream.writeSSE({ event: events.messageStop().event, data: JSON.stringify(events.messageStop().data) })
             }
-            await stream.writeSSE({ event: events.messageStop().event, data: JSON.stringify(events.messageStop().data) })
           }
         }
       } catch (err: any) {
