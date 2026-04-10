@@ -16,6 +16,8 @@ import {
   toResponsesApiResponse,
   responsesStreamEvents,
   anthropicMessagesToPrompt,
+  anthropicToolsToPrompt,
+  toAnthropicPrompt,
 } from './transform.js'
 
 describe('messagesToPrompt', () => {
@@ -367,5 +369,49 @@ describe('anthropicMessagesToPrompt', () => {
     const result = anthropicMessagesToPrompt(messages)
     expect(result).toContain('Let me check.')
     expect(result).toContain('[Tool call: read_file]')
+  })
+})
+
+describe('anthropicToolsToPrompt', () => {
+  it('returns empty string when no tools', () => {
+    expect(anthropicToolsToPrompt([])).toBe('')
+    expect(anthropicToolsToPrompt(undefined)).toBe('')
+  })
+
+  it('formats tool definitions with instructions', () => {
+    const tools = [{
+      name: 'get_weather',
+      description: 'Get weather for a location',
+      input_schema: {
+        type: 'object',
+        properties: { location: { type: 'string' } },
+        required: ['location'],
+      },
+    }]
+    const result = anthropicToolsToPrompt(tools)
+    expect(result).toContain('get_weather')
+    expect(result).toContain('Get weather for a location')
+    expect(result).toContain('"location"')
+    expect(result).toContain('tool_use')
+  })
+})
+
+describe('toAnthropicPrompt', () => {
+  it('builds prompt without tools or system', () => {
+    const result = toAnthropicPrompt({
+      messages: [{ role: 'user', content: 'Hello' }],
+    })
+    expect(result).toBe('Hello')
+  })
+
+  it('builds prompt with system and tools', () => {
+    const result = toAnthropicPrompt({
+      system: 'Be helpful',
+      tools: [{ name: 'bash', description: 'Run bash', input_schema: { type: 'object', properties: { command: { type: 'string' } } } }],
+      messages: [{ role: 'user', content: 'List files' }],
+    })
+    expect(result).toContain('[System] Be helpful')
+    expect(result).toContain('bash')
+    expect(result).toContain('[User] List files')
   })
 })

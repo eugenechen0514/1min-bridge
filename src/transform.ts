@@ -101,6 +101,37 @@ export function anthropicMessagesToPrompt(
   return parts.join('\n')
 }
 
+export function anthropicToolsToPrompt(tools?: any[]): string {
+  if (!tools || tools.length === 0) return ''
+
+  const toolDefs = tools.map((t) =>
+    `- ${t.name}: ${t.description}\n  Input schema: ${JSON.stringify(t.input_schema)}`
+  ).join('\n')
+
+  return [
+    'You have access to the following tools. When you want to use a tool, respond ONLY with a single JSON object in this exact format (no other text before or after):',
+    '{"type":"tool_use","id":"toolu_UNIQUE_ID","name":"TOOL_NAME","input":{...}}',
+    '',
+    'Available tools:',
+    toolDefs,
+    '',
+    'Rules:',
+    '- If you need to use a tool, output ONLY the JSON tool call, nothing else.',
+    '- If you want to respond with text (no tool needed), just respond normally with text.',
+    '- For the "id" field, generate a unique ID starting with "toolu_".',
+  ].join('\n')
+}
+
+export function toAnthropicPrompt(body: {
+  messages: { role: string; content: string | any[] }[]
+  system?: string
+  tools?: any[]
+}): string {
+  const toolPrompt = anthropicToolsToPrompt(body.tools)
+  const systemParts = [body.system, toolPrompt].filter(Boolean).join('\n\n')
+  return anthropicMessagesToPrompt(body.messages, systemParts || undefined)
+}
+
 export function extractImages(messages: Message[]): string[] {
   const urls: string[] = []
   for (const msg of messages) {
