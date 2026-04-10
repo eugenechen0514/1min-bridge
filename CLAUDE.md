@@ -20,15 +20,19 @@ Type check without emitting: `pnpm exec tsc --noEmit`
 ## Architecture
 
 ```
-Client → index.ts (Hono routes) → transform.ts (format conversion) → oneminai.ts (API client) → 1min.ai
+Client → index.ts (route registry) → {openai,ollama,anthropic}/routes.ts → core/transform.ts → oneminai.ts → 1min.ai
 ```
 
-Four source files, each with a single responsibility:
+Organized by API format, with shared infrastructure:
 
-- **`src/config.ts`** — Model list (73 models), model name mapping (`MODEL_MAPPING` env var), API key resolution (Bearer token > env var). Pure functions + config object export.
-- **`src/transform.ts`** — All format conversion between OpenAI/Ollama and 1min.ai. Pure functions, no I/O. This is where the `messages[]` → single `prompt` string conversion happens.
-- **`src/oneminai.ts`** — HTTP client for 1min.ai. Two functions: `chatWithAi` (returns JSON) and `chatWithAiStream` (async generator yielding SSE events).
-- **`src/index.ts`** — Hono app with all routes + `serve()` call. No business logic here, just wiring.
+- **`src/index.ts`** — Hono app composition root: CORS, health check, registers routes from each API module. ~40 lines.
+- **`src/core/types.ts`** — Shared types (`Message`, `ContentPart`, `OneMinAiRequestInput`, `ROLE_PREFIX`).
+- **`src/core/transform.ts`** — Shared transform functions (`messagesToPrompt`, `extractImages`, `toOneMinAiRequest`, `fromOneMinAiResponse`, `extractWebSearch`). Pure functions, no I/O.
+- **`src/openai/`** — OpenAI Chat Completions + Responses API. `transform.ts` (response formatters, streaming events), `routes.ts` (3 routes).
+- **`src/ollama/`** — Ollama Chat + Generate API. `transform.ts` (response formatters), `routes.ts` (3 routes).
+- **`src/anthropic/`** — Anthropic Messages API. `transform.ts` (prompt building, tool parsing, streaming events, model info), `routes.ts` (4 routes + middleware).
+- **`src/config.ts`** — Model list, model name mapping, API key resolution. Pure functions + config object export.
+- **`src/oneminai.ts`** — HTTP client for 1min.ai. `chatWithAi` (JSON), `chatWithAiStream` (async SSE generator), asset upload.
 
 ## Key Design Decisions
 

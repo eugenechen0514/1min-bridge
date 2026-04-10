@@ -19,7 +19,7 @@ export interface OneMinAiRequest {
   model: string
   promptObject: {
     prompt: string
-    attachments?: { images: string[] }
+    attachments?: { images?: string[]; files?: string[] }
     settings?: { webSearchSettings: { webSearch: boolean } }
   }
 }
