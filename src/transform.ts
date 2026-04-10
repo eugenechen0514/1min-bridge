@@ -247,6 +247,62 @@ export function toOllamaGenerateStreamChunk(content: string, model: string, done
   }
 }
 
+// ── Anthropic Response Parsing ─────────────────────────
+
+export function parseAnthropicResponse(text: string): {
+  type: 'text' | 'tool_use'
+  content: any[]
+  stop_reason: string
+} {
+  const trimmed = text.trim()
+
+  // Try to find a tool_use JSON in the response
+  const toolCallRegex = /\{"type"\s*:\s*"tool_use"[\s\S]*\}$/
+  const match = trimmed.match(toolCallRegex)
+
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0])
+      if (parsed.type === 'tool_use' && parsed.name && parsed.id) {
+        const content: any[] = []
+        const beforeText = trimmed.slice(0, match.index).trim()
+        if (beforeText) {
+          content.push({ type: 'text', text: beforeText })
+        }
+        content.push({
+          type: 'tool_use',
+          id: parsed.id,
+          name: parsed.name,
+          input: parsed.input ?? {},
+        })
+        return { type: 'tool_use', content, stop_reason: 'tool_use' }
+      }
+    } catch {
+      // Not valid JSON, treat as text
+    }
+  }
+
+  return {
+    type: 'text',
+    content: [{ type: 'text', text: trimmed }],
+    stop_reason: 'end_turn',
+  }
+}
+
+export function toAnthropicResponse(rawText: string, model: string) {
+  const parsed = parseAnthropicResponse(rawText)
+  return {
+    id: `msg_${crypto.randomUUID()}`,
+    type: 'message' as const,
+    role: 'assistant' as const,
+    model,
+    content: parsed.content,
+    stop_reason: parsed.stop_reason,
+    stop_sequence: null,
+    usage: { input_tokens: 0, output_tokens: 0 },
+  }
+}
+
 // ── Responses API ─────────────────────────────────────
 
 /**

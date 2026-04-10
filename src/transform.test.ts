@@ -18,6 +18,8 @@ import {
   anthropicMessagesToPrompt,
   anthropicToolsToPrompt,
   toAnthropicPrompt,
+  parseAnthropicResponse,
+  toAnthropicResponse,
 } from './transform.js'
 
 describe('messagesToPrompt', () => {
@@ -413,5 +415,68 @@ describe('toAnthropicPrompt', () => {
     expect(result).toContain('[System] Be helpful')
     expect(result).toContain('bash')
     expect(result).toContain('[User] List files')
+  })
+})
+
+describe('parseAnthropicResponse', () => {
+  it('returns text content block for plain text', () => {
+    const result = parseAnthropicResponse('Hello world')
+    expect(result).toEqual({
+      type: 'text',
+      content: [{ type: 'text', text: 'Hello world' }],
+      stop_reason: 'end_turn',
+    })
+  })
+
+  it('returns tool_use content block for tool call JSON', () => {
+    const json = '{"type":"tool_use","id":"toolu_123","name":"bash","input":{"command":"ls"}}'
+    const result = parseAnthropicResponse(json)
+    expect(result).toEqual({
+      type: 'tool_use',
+      content: [{ type: 'tool_use', id: 'toolu_123', name: 'bash', input: { command: 'ls' } }],
+      stop_reason: 'tool_use',
+    })
+  })
+
+  it('handles tool call JSON with surrounding whitespace', () => {
+    const json = '  \n{"type":"tool_use","id":"toolu_456","name":"read","input":{"path":"/tmp"}}\n  '
+    const result = parseAnthropicResponse(json)
+    expect(result.type).toBe('tool_use')
+    expect(result.content[0].name).toBe('read')
+  })
+
+  it('treats non-tool JSON as text', () => {
+    const result = parseAnthropicResponse('{"key": "value"}')
+    expect(result.type).toBe('text')
+  })
+
+  it('handles text before tool call JSON (text + tool_use)', () => {
+    const text = 'Let me check that.\n{"type":"tool_use","id":"toolu_789","name":"bash","input":{"command":"ls"}}'
+    const result = parseAnthropicResponse(text)
+    expect(result.type).toBe('tool_use')
+    expect(result.content).toHaveLength(2)
+    expect(result.content[0]).toEqual({ type: 'text', text: 'Let me check that.' })
+    expect(result.content[1].type).toBe('tool_use')
+  })
+})
+
+describe('toAnthropicResponse', () => {
+  it('builds text response', () => {
+    const result = toAnthropicResponse('Hello!', 'claude-sonnet-4-20250514')
+    expect(result.id).toMatch(/^msg_/)
+    expect(result.type).toBe('message')
+    expect(result.role).toBe('assistant')
+    expect(result.model).toBe('claude-sonnet-4-20250514')
+    expect(result.content).toEqual([{ type: 'text', text: 'Hello!' }])
+    expect(result.stop_reason).toBe('end_turn')
+    expect(result.usage).toBeDefined()
+  })
+
+  it('builds tool_use response', () => {
+    const toolJson = '{"type":"tool_use","id":"toolu_1","name":"bash","input":{"command":"ls"}}'
+    const result = toAnthropicResponse(toolJson, 'claude-sonnet-4-20250514')
+    expect(result.stop_reason).toBe('tool_use')
+    expect(result.content[0].type).toBe('tool_use')
+    expect(result.content[0].name).toBe('bash')
   })
 })
