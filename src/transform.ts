@@ -247,6 +247,48 @@ export function toOllamaGenerateStreamChunk(content: string, model: string, done
   }
 }
 
+// ── Anthropic Models ──────────────────────────────────
+
+const defaultCap = { supported: false }
+const supportedCap = { supported: true }
+
+function anthropicModelInfo(id: string) {
+  return {
+    id,
+    type: 'model' as const,
+    display_name: id,
+    created_at: '2025-01-01T00:00:00Z',
+    max_input_tokens: 200000,
+    max_tokens: 8192,
+    capabilities: {
+      batch: defaultCap,
+      citations: defaultCap,
+      code_execution: defaultCap,
+      context_management: { supported: false, clear_thinking_20251015: defaultCap, clear_tool_uses_20250919: defaultCap, compact_20260112: defaultCap },
+      effort: { supported: false, high: defaultCap, low: defaultCap, max: defaultCap, medium: defaultCap },
+      image_input: supportedCap,
+      pdf_input: defaultCap,
+      structured_outputs: defaultCap,
+      thinking: { supported: false, types: { adaptive: defaultCap, enabled: defaultCap } },
+    },
+  }
+}
+
+export function toAnthropicModelList(models: { id: string; owned_by: string }[]) {
+  const anthropicModels = models.filter(m => m.owned_by === 'anthropic' || m.id.startsWith('claude'))
+  const data = anthropicModels.map(m => anthropicModelInfo(m.id))
+  return {
+    data,
+    has_more: false,
+    first_id: data[0]?.id ?? null,
+    last_id: data[data.length - 1]?.id ?? null,
+  }
+}
+
+export function toAnthropicModelInfo(modelId: string) {
+  return anthropicModelInfo(modelId)
+}
+
 // ── Anthropic Response Parsing ─────────────────────────
 
 export function parseAnthropicResponse(text: string): {

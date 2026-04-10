@@ -3,7 +3,7 @@ import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { serve } from '@hono/node-server'
 import { config, getModelList, resolveModelName, getApiKey } from './config.js'
-import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse } from './transform.js'
+import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse, toAnthropicModelList, toAnthropicModelInfo } from './transform.js'
 import { chatWithAi, chatWithAiStream } from './oneminai.js'
 
 const app = new Hono()
@@ -275,6 +275,18 @@ app.post('/v1/responses', async (c) => {
     const message = err.message || 'Upstream error'
     return c.json({ error: { message, type: 'upstream_error', code: String(status) } }, status)
   }
+})
+
+// GET /anthropic/v1/models — Anthropic model list
+app.get('/anthropic/v1/models', (c) => {
+  const models = getModelList(config.modelMapping)
+  return c.json(toAnthropicModelList(models))
+})
+
+// GET /anthropic/v1/models/:model_id — Anthropic model info
+app.get('/anthropic/v1/models/:model_id', (c) => {
+  const modelId = c.req.param('model_id')
+  return c.json(toAnthropicModelInfo(modelId))
 })
 
 // POST /anthropic/v1/messages — Anthropic Messages API
