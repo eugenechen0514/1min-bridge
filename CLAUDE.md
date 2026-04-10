@@ -56,8 +56,10 @@ Four source files, each with a single responsibility:
 | GET | `/v1/models` | OpenAI model list |
 | GET | `/api/tags` | Ollama model list |
 | POST | `/v1/chat/completions` | OpenAI chat (streaming SSE + non-streaming) |
+| POST | `/v1/responses` | OpenAI Responses API (streaming SSE + non-streaming) |
 | POST | `/api/chat` | Ollama chat (streaming NDJSON + non-streaming) |
 | POST | `/api/generate` | Ollama generate (streaming NDJSON + non-streaming) |
+| POST | `/anthropic/v1/messages` | Anthropic Messages API (streaming SSE + non-streaming, prompt-based tool calling) |
 
 ## Manual Testing
 
@@ -93,4 +95,19 @@ curl http://localhost:11434/v1/chat/completions \
 curl http://localhost:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Latest tech news today"}],"web_search_options":{}}'
+
+# Anthropic Messages API (non-streaming)
+curl http://localhost:11434/anthropic/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{"model":"claude-sonnet-4-20250514","max_tokens":100,"messages":[{"role":"user","content":"Say hi"}]}'
+
+# Anthropic Messages API (streaming)
+curl http://localhost:11434/anthropic/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{"model":"claude-sonnet-4-20250514","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"Say hi"}]}'
+
+# Claude Code CLI usage:
+# ANTHROPIC_BASE_URL=http://localhost:11434/anthropic claude
 ```

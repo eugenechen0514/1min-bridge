@@ -1,11 +1,18 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { serve } from '@hono/node-server'
 import { config, getModelList, resolveModelName, getApiKey } from './config.js'
-import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk } from './transform.js'
+import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse } from './transform.js'
 import { chatWithAi, chatWithAiStream } from './oneminai.js'
 
 const app = new Hono()
+
+app.use('*', cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['*'],
+}))
 
 // GET /health
 app.get('/health', (c) => c.json({ status: 'ok' }))
@@ -199,6 +206,165 @@ app.post('/api/generate', async (c) => {
   }
 })
 
+// POST /v1/responses — OpenAI Responses API
+app.post('/v1/responses', async (c) => {
+  const body = await c.req.json()
+
+  const authHeader = c.req.header('Authorization')
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+  const apiKey = getApiKey(bearerToken, config.apiKey)
+
+  if (!apiKey) {
+    return c.json({ error: { message: 'API key is required', type: 'invalid_request_error', code: 'missing_api_key' } }, 401)
+  }
+
+  const model = resolveModelName(body.model, config.modelMapping)
+  const prompt = responsesInputToPrompt(body.input, body.instructions)
+  const images = responsesExtractImages(body.input)
+  const webSearch = body.tools?.some((t: any) => t.type === 'web_search') ?? false
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images, webSearch })
+
+  // Streaming
+  if (body.stream) {
+    return streamSSE(c, async (stream) => {
+      const events = responsesStreamEvents(model)
+      let fullText = ''
+
+      try {
+        await stream.writeSSE({ event: events.created().event, data: JSON.stringify(events.created().data) })
+        await stream.writeSSE({ event: events.outputItemAdded().event, data: JSON.stringify(events.outputItemAdded().data) })
+        await stream.writeSSE({ event: events.contentPartAdded().event, data: JSON.stringify(events.contentPartAdded().data) })
+
+        for await (const { event, data } of chatWithAiStream(oneMinReq, apiKey)) {
+          if (event === 'content') {
+            const parsed = JSON.parse(data)
+            fullText += parsed.content
+            await stream.writeSSE({ event: events.textDelta(parsed.content).event, data: JSON.stringify(events.textDelta(parsed.content).data) })
+          } else if (event === 'done') {
+            await stream.writeSSE({ event: events.textDone(fullText).event, data: JSON.stringify(events.textDone(fullText).data) })
+            await stream.writeSSE({ event: events.contentPartDone(fullText).event, data: JSON.stringify(events.contentPartDone(fullText).data) })
+            await stream.writeSSE({ event: events.outputItemDone(fullText).event, data: JSON.stringify(events.outputItemDone(fullText).data) })
+            await stream.writeSSE({ event: events.completed(fullText).event, data: JSON.stringify(events.completed(fullText).data) })
+          }
+        }
+      } catch (err: any) {
+        await stream.writeSSE({
+          event: 'response.failed',
+          data: JSON.stringify({ error: { message: err.message || 'Upstream error', code: String(err.status || 502) } }),
+        })
+      }
+    })
+  }
+
+  // Non-streaming
+  try {
+    const data = await chatWithAi(oneMinReq, apiKey)
+    const content = fromOneMinAiResponse(data)
+    return c.json(toResponsesApiResponse(content, model))
+  } catch (err: any) {
+    const status = err.status || 502
+    const message = err.message || 'Upstream error'
+    return c.json({ error: { message, type: 'upstream_error', code: String(status) } }, status)
+  }
+})
+
+// POST /anthropic/v1/messages — Anthropic Messages API
+app.post('/anthropic/v1/messages', async (c) => {
+  const body = await c.req.json()
+
+  // API key: x-api-key header > Authorization Bearer > env
+  const xApiKey = c.req.header('x-api-key')
+  const authHeader = c.req.header('Authorization')
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+  const apiKey = getApiKey(xApiKey ?? bearerToken, config.apiKey)
+
+  if (!apiKey) {
+    return c.json({
+      type: 'error',
+      error: { type: 'authentication_error', message: 'API key is required' },
+    }, 401)
+  }
+
+  const model = resolveModelName(body.model, config.modelMapping)
+  const prompt = toAnthropicPrompt(body)
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images: [], webSearch: false })
+
+  // Streaming
+  if (body.stream) {
+    return streamSSE(c, async (stream) => {
+      const events = anthropicStreamEvents(model)
+      let fullText = ''
+      let firstChunk = true
+      let isBuffering = false
+
+      try {
+        await stream.writeSSE({ event: events.messageStart().event, data: JSON.stringify(events.messageStart().data) })
+        await stream.writeSSE({ event: events.ping().event, data: JSON.stringify(events.ping().data) })
+
+        for await (const { event, data } of chatWithAiStream(oneMinReq, apiKey)) {
+          if (event === 'content') {
+            const parsed = JSON.parse(data)
+            const chunk = parsed.content
+
+            if (firstChunk) {
+              firstChunk = false
+              if (chunk.trimStart().startsWith('{')) {
+                isBuffering = true
+              } else {
+                await stream.writeSSE({ event: events.contentBlockStart(0, 'text').event, data: JSON.stringify(events.contentBlockStart(0, 'text').data) })
+              }
+            }
+
+            fullText += chunk
+
+            if (!isBuffering) {
+              await stream.writeSSE({ event: events.textDelta(0, chunk).event, data: JSON.stringify(events.textDelta(0, chunk).data) })
+            }
+          } else if (event === 'done') {
+            if (isBuffering) {
+              const result = parseAnthropicResponse(fullText)
+              if (result.type === 'tool_use') {
+                const toolBlock = result.content.find((b: any) => b.type === 'tool_use')
+                await stream.writeSSE({ event: events.contentBlockStart(0, 'tool_use', { id: toolBlock.id, name: toolBlock.name }).event, data: JSON.stringify(events.contentBlockStart(0, 'tool_use', { id: toolBlock.id, name: toolBlock.name }).data) })
+                await stream.writeSSE({ event: events.inputJsonDelta(0, JSON.stringify(toolBlock.input)).event, data: JSON.stringify(events.inputJsonDelta(0, JSON.stringify(toolBlock.input)).data) })
+                await stream.writeSSE({ event: events.contentBlockStop(0).event, data: JSON.stringify(events.contentBlockStop(0).data) })
+                await stream.writeSSE({ event: events.messageDelta('tool_use').event, data: JSON.stringify(events.messageDelta('tool_use').data) })
+              } else {
+                await stream.writeSSE({ event: events.contentBlockStart(0, 'text').event, data: JSON.stringify(events.contentBlockStart(0, 'text').data) })
+                await stream.writeSSE({ event: events.textDelta(0, fullText).event, data: JSON.stringify(events.textDelta(0, fullText).data) })
+                await stream.writeSSE({ event: events.contentBlockStop(0).event, data: JSON.stringify(events.contentBlockStop(0).data) })
+                await stream.writeSSE({ event: events.messageDelta('end_turn').event, data: JSON.stringify(events.messageDelta('end_turn').data) })
+              }
+            } else {
+              await stream.writeSSE({ event: events.contentBlockStop(0).event, data: JSON.stringify(events.contentBlockStop(0).data) })
+              await stream.writeSSE({ event: events.messageDelta('end_turn').event, data: JSON.stringify(events.messageDelta('end_turn').data) })
+            }
+            await stream.writeSSE({ event: events.messageStop().event, data: JSON.stringify(events.messageStop().data) })
+          }
+        }
+      } catch (err: any) {
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({ type: 'error', error: { type: 'api_error', message: err.message || 'Upstream error' } }),
+        })
+      }
+    })
+  }
+
+  // Non-streaming
+  try {
+    const data = await chatWithAi(oneMinReq, apiKey)
+    const rawText = fromOneMinAiResponse(data)
+    return c.json(toAnthropicResponse(rawText, model))
+  } catch (err: any) {
+    const status = err.status || 502
+    return c.json({
+      type: 'error',
+      error: { type: 'api_error', message: err.message || 'Upstream error' },
+    }, status)
+  }
+})
+
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   const models = getModelList(config.modelMapping)
   const aliasCount = Object.keys(config.modelMapping).length
@@ -206,8 +372,9 @@ serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log('')
   console.log('  1min.ai Relay Server')
   console.log('  ────────────────────────────────────────')
-  console.log(`  OpenAI:  http://localhost:${info.port}/v1/chat/completions`)
-  console.log(`  Ollama:  http://localhost:${info.port}/api/chat`)
+  console.log(`  OpenAI:    http://localhost:${info.port}/v1/chat/completions`)
+  console.log(`  Ollama:    http://localhost:${info.port}/api/chat`)
+  console.log(`  Anthropic: http://localhost:${info.port}/anthropic/v1/messages`)
   console.log(`  Models:  ${models.length} loaded${aliasCount > 0 ? ` (${aliasCount} aliases)` : ''}`)
   console.log(`  API Key: ${config.apiKey ? 'from env ✓' : 'not set (pass via Bearer token)'}`)
   console.log('  ────────────────────────────────────────')

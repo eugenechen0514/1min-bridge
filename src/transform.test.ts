@@ -11,6 +11,16 @@ import {
   toOllamaChatStreamChunk,
   toOllamaGenerateResponse,
   toOllamaGenerateStreamChunk,
+  responsesInputToPrompt,
+  responsesExtractImages,
+  toResponsesApiResponse,
+  responsesStreamEvents,
+  anthropicMessagesToPrompt,
+  anthropicToolsToPrompt,
+  toAnthropicPrompt,
+  parseAnthropicResponse,
+  toAnthropicResponse,
+  anthropicStreamEvents,
 } from './transform.js'
 
 describe('messagesToPrompt', () => {
@@ -205,5 +215,306 @@ describe('toOllamaGenerateStreamChunk', () => {
     const chunk = toOllamaGenerateStreamChunk('Hi', 'gpt-4o', false)
     expect(chunk.done).toBe(false)
     expect(chunk.response).toBe('Hi')
+  })
+})
+
+// ── Responses API ─────────────────────────────────────
+
+describe('responsesInputToPrompt', () => {
+  it('handles string input', () => {
+    expect(responsesInputToPrompt('Hello')).toBe('Hello')
+  })
+
+  it('handles string input with instructions', () => {
+    expect(responsesInputToPrompt('Hello', 'Be helpful')).toBe('[System] Be helpful\n[User] Hello')
+  })
+
+  it('handles InputItem array', () => {
+    const input = [
+      { type: 'message', role: 'user', content: 'Hi' },
+      { type: 'message', role: 'assistant', content: 'Hello!' },
+      { type: 'message', role: 'user', content: 'How are you?' },
+    ]
+    expect(responsesInputToPrompt(input)).toBe('[User] Hi\n[Assistant] Hello!\n[User] How are you?')
+  })
+
+  it('ignores non-message items like function_call_output', () => {
+    const input = [
+      { type: 'message', role: 'user', content: 'What weather?' },
+      { type: 'function_call_output', call_id: 'c1', output: '25C' },
+      { type: 'message', role: 'user', content: 'Thanks' },
+    ]
+    expect(responsesInputToPrompt(input)).toBe('[User] What weather?\n[User] Thanks')
+  })
+})
+
+describe('responsesExtractImages', () => {
+  it('returns empty for string input', () => {
+    expect(responsesExtractImages('Hello')).toEqual([])
+  })
+
+  it('extracts images from InputItem array', () => {
+    const input = [{
+      type: 'message',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'What is this?' },
+        { type: 'image_url', image_url: { url: 'https://example.com/img.png' } },
+      ],
+    }]
+    expect(responsesExtractImages(input)).toEqual(['https://example.com/img.png'])
+  })
+})
+
+describe('toResponsesApiResponse', () => {
+  it('wraps content in Responses API format', () => {
+    const result = toResponsesApiResponse('Hello!', 'gpt-4o')
+    expect(result.object).toBe('response')
+    expect(result.status).toBe('completed')
+    expect(result.model).toBe('gpt-4o')
+    expect(result.id).toMatch(/^resp_/)
+    expect(result.output).toHaveLength(1)
+    expect(result.output[0].type).toBe('message')
+    expect(result.output[0].role).toBe('assistant')
+    expect(result.output[0].content[0].type).toBe('output_text')
+    expect(result.output[0].content[0].text).toBe('Hello!')
+    expect(result.error).toBeNull()
+  })
+})
+
+describe('responsesStreamEvents', () => {
+  it('generates correct event sequence', () => {
+    const events = responsesStreamEvents('gpt-4o')
+    expect(events.respId).toMatch(/^resp_/)
+    expect(events.msgId).toMatch(/^msg_/)
+
+    const created = events.created()
+    expect(created.event).toBe('response.created')
+    expect(created.data.status).toBe('in_progress')
+
+    const delta = events.textDelta('Hi')
+    expect(delta.event).toBe('response.output_text.delta')
+    expect(delta.data.delta).toBe('Hi')
+
+    const completed = events.completed('Hello world')
+    expect(completed.event).toBe('response.completed')
+    expect(completed.data.status).toBe('completed')
+    expect(completed.data.output[0].content[0].text).toBe('Hello world')
+  })
+})
+
+// ── Anthropic Messages API ───────────────────────────
+
+describe('anthropicMessagesToPrompt', () => {
+  it('converts single user message', () => {
+    const messages = [{ role: 'user', content: 'Hello' }]
+    expect(anthropicMessagesToPrompt(messages)).toBe('Hello')
+  })
+
+  it('converts content array with text block', () => {
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }]
+    expect(anthropicMessagesToPrompt(messages)).toBe('Hello')
+  })
+
+  it('converts multi-turn conversation', () => {
+    const messages = [
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant', content: 'Hello!' },
+      { role: 'user', content: 'How are you?' },
+    ]
+    expect(anthropicMessagesToPrompt(messages)).toBe(
+      '[User] Hi\n[Assistant] Hello!\n[User] How are you?'
+    )
+  })
+
+  it('prepends system message', () => {
+    const messages = [{ role: 'user', content: 'Hi' }]
+    expect(anthropicMessagesToPrompt(messages, 'Be helpful')).toBe(
+      '[System] Be helpful\n[User] Hi'
+    )
+  })
+
+  it('serializes tool_use block in assistant message', () => {
+    const messages = [
+      { role: 'user', content: 'List files' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'toolu_1', name: 'bash', input: { command: 'ls' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_1', content: 'file1.txt\nfile2.txt' },
+        ],
+      },
+      { role: 'user', content: 'What files are there?' },
+    ]
+    const result = anthropicMessagesToPrompt(messages)
+    expect(result).toContain('[Assistant] [Tool call: bash]')
+    expect(result).toContain('"command": "ls"')
+    expect(result).toContain('[Tool result for toolu_1]')
+    expect(result).toContain('file1.txt')
+  })
+
+  it('serializes mixed text and tool_use in assistant message', () => {
+    const messages = [
+      { role: 'user', content: 'Hi' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Let me check.' },
+          { type: 'tool_use', id: 'toolu_2', name: 'read_file', input: { path: '/tmp/x' } },
+        ],
+      },
+    ]
+    const result = anthropicMessagesToPrompt(messages)
+    expect(result).toContain('Let me check.')
+    expect(result).toContain('[Tool call: read_file]')
+  })
+})
+
+describe('anthropicToolsToPrompt', () => {
+  it('returns empty string when no tools', () => {
+    expect(anthropicToolsToPrompt([])).toBe('')
+    expect(anthropicToolsToPrompt(undefined)).toBe('')
+  })
+
+  it('formats tool definitions with instructions', () => {
+    const tools = [{
+      name: 'get_weather',
+      description: 'Get weather for a location',
+      input_schema: {
+        type: 'object',
+        properties: { location: { type: 'string' } },
+        required: ['location'],
+      },
+    }]
+    const result = anthropicToolsToPrompt(tools)
+    expect(result).toContain('get_weather')
+    expect(result).toContain('Get weather for a location')
+    expect(result).toContain('"location"')
+    expect(result).toContain('tool_use')
+  })
+})
+
+describe('toAnthropicPrompt', () => {
+  it('builds prompt without tools or system', () => {
+    const result = toAnthropicPrompt({
+      messages: [{ role: 'user', content: 'Hello' }],
+    })
+    expect(result).toBe('Hello')
+  })
+
+  it('builds prompt with system and tools', () => {
+    const result = toAnthropicPrompt({
+      system: 'Be helpful',
+      tools: [{ name: 'bash', description: 'Run bash', input_schema: { type: 'object', properties: { command: { type: 'string' } } } }],
+      messages: [{ role: 'user', content: 'List files' }],
+    })
+    expect(result).toContain('[System] Be helpful')
+    expect(result).toContain('bash')
+    expect(result).toContain('[User] List files')
+  })
+})
+
+describe('parseAnthropicResponse', () => {
+  it('returns text content block for plain text', () => {
+    const result = parseAnthropicResponse('Hello world')
+    expect(result).toEqual({
+      type: 'text',
+      content: [{ type: 'text', text: 'Hello world' }],
+      stop_reason: 'end_turn',
+    })
+  })
+
+  it('returns tool_use content block for tool call JSON', () => {
+    const json = '{"type":"tool_use","id":"toolu_123","name":"bash","input":{"command":"ls"}}'
+    const result = parseAnthropicResponse(json)
+    expect(result).toEqual({
+      type: 'tool_use',
+      content: [{ type: 'tool_use', id: 'toolu_123', name: 'bash', input: { command: 'ls' } }],
+      stop_reason: 'tool_use',
+    })
+  })
+
+  it('handles tool call JSON with surrounding whitespace', () => {
+    const json = '  \n{"type":"tool_use","id":"toolu_456","name":"read","input":{"path":"/tmp"}}\n  '
+    const result = parseAnthropicResponse(json)
+    expect(result.type).toBe('tool_use')
+    expect(result.content[0].name).toBe('read')
+  })
+
+  it('treats non-tool JSON as text', () => {
+    const result = parseAnthropicResponse('{"key": "value"}')
+    expect(result.type).toBe('text')
+  })
+
+  it('handles text before tool call JSON (text + tool_use)', () => {
+    const text = 'Let me check that.\n{"type":"tool_use","id":"toolu_789","name":"bash","input":{"command":"ls"}}'
+    const result = parseAnthropicResponse(text)
+    expect(result.type).toBe('tool_use')
+    expect(result.content).toHaveLength(2)
+    expect(result.content[0]).toEqual({ type: 'text', text: 'Let me check that.' })
+    expect(result.content[1].type).toBe('tool_use')
+  })
+})
+
+describe('toAnthropicResponse', () => {
+  it('builds text response', () => {
+    const result = toAnthropicResponse('Hello!', 'claude-sonnet-4-20250514')
+    expect(result.id).toMatch(/^msg_/)
+    expect(result.type).toBe('message')
+    expect(result.role).toBe('assistant')
+    expect(result.model).toBe('claude-sonnet-4-20250514')
+    expect(result.content).toEqual([{ type: 'text', text: 'Hello!' }])
+    expect(result.stop_reason).toBe('end_turn')
+    expect(result.usage).toBeDefined()
+  })
+
+  it('builds tool_use response', () => {
+    const toolJson = '{"type":"tool_use","id":"toolu_1","name":"bash","input":{"command":"ls"}}'
+    const result = toAnthropicResponse(toolJson, 'claude-sonnet-4-20250514')
+    expect(result.stop_reason).toBe('tool_use')
+    expect(result.content[0].type).toBe('tool_use')
+    expect(result.content[0].name).toBe('bash')
+  })
+})
+
+describe('anthropicStreamEvents', () => {
+  it('generates message_start event', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const start = events.messageStart()
+    expect(start.event).toBe('message_start')
+    expect(start.data.message.model).toBe('claude-sonnet-4-20250514')
+    expect(start.data.message.role).toBe('assistant')
+  })
+
+  it('generates content_block_start for text', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const block = events.contentBlockStart(0, 'text')
+    expect(block.event).toBe('content_block_start')
+    expect(block.data.content_block.type).toBe('text')
+  })
+
+  it('generates text delta', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const delta = events.textDelta(0, 'Hello')
+    expect(delta.event).toBe('content_block_delta')
+    expect(delta.data.delta.text).toBe('Hello')
+  })
+
+  it('generates message_delta with stop_reason', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const delta = events.messageDelta('end_turn')
+    expect(delta.event).toBe('message_delta')
+    expect(delta.data.delta.stop_reason).toBe('end_turn')
+  })
+
+  it('generates message_stop', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const stop = events.messageStop()
+    expect(stop.event).toBe('message_stop')
   })
 })
