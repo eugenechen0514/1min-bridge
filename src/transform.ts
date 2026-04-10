@@ -298,30 +298,48 @@ export function parseAnthropicResponse(text: string): {
 } {
   const trimmed = text.trim()
 
-  // Try to find a tool_use JSON in the response
-  const toolCallRegex = /\{"type"\s*:\s*"tool_use"[\s\S]*\}$/
-  const match = trimmed.match(toolCallRegex)
-
-  if (match) {
-    try {
-      const parsed = JSON.parse(match[0])
-      if (parsed.type === 'tool_use' && parsed.name && parsed.id) {
-        const content: any[] = []
-        const beforeText = trimmed.slice(0, match.index).trim()
-        if (beforeText) {
-          content.push({ type: 'text', text: beforeText })
-        }
-        content.push({
-          type: 'tool_use',
-          id: parsed.id,
-          name: parsed.name,
-          input: parsed.input ?? {},
-        })
-        return { type: 'tool_use', content, stop_reason: 'tool_use' }
+  // Find all tool_use JSON objects in the response
+  const toolCalls: { index: number; length: number; parsed: any }[] = []
+  const toolCallPattern = /\{"type"\s*:\s*"tool_use"/g
+  let searchMatch
+  while ((searchMatch = toolCallPattern.exec(trimmed)) !== null) {
+    // Try to extract a valid JSON object starting at this position
+    const startIdx = searchMatch.index
+    let braceDepth = 0
+    let endIdx = -1
+    for (let i = startIdx; i < trimmed.length; i++) {
+      if (trimmed[i] === '{') braceDepth++
+      else if (trimmed[i] === '}') {
+        braceDepth--
+        if (braceDepth === 0) { endIdx = i + 1; break }
       }
-    } catch {
-      // Not valid JSON, treat as text
     }
+    if (endIdx > startIdx) {
+      try {
+        const parsed = JSON.parse(trimmed.slice(startIdx, endIdx))
+        if (parsed.type === 'tool_use' && parsed.name && parsed.id) {
+          toolCalls.push({ index: startIdx, length: endIdx - startIdx, parsed })
+        }
+      } catch { /* not valid JSON, skip */ }
+    }
+  }
+
+  if (toolCalls.length > 0) {
+    const content: any[] = []
+    // Extract text before the first tool call
+    const beforeText = trimmed.slice(0, toolCalls[0].index).trim()
+    if (beforeText) {
+      content.push({ type: 'text', text: beforeText })
+    }
+    for (const tc of toolCalls) {
+      content.push({
+        type: 'tool_use',
+        id: tc.parsed.id,
+        name: tc.parsed.name,
+        input: tc.parsed.input ?? {},
+      })
+    }
+    return { type: 'tool_use', content, stop_reason: 'tool_use' }
   }
 
   return {

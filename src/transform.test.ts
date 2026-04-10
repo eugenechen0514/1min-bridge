@@ -459,6 +459,26 @@ describe('parseAnthropicResponse', () => {
     expect(result.content[0]).toEqual({ type: 'text', text: 'Let me check that.' })
     expect(result.content[1].type).toBe('tool_use')
   })
+
+  it('handles multiple tool calls', () => {
+    const text = 'I will read two files.\n{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/tmp/a.txt"}}\n{"type":"tool_use","id":"toolu_02","name":"Read","input":{"file_path":"/tmp/b.txt"}}'
+    const result = parseAnthropicResponse(text)
+    expect(result.type).toBe('tool_use')
+    expect(result.content).toHaveLength(3)
+    expect(result.content[0]).toEqual({ type: 'text', text: 'I will read two files.' })
+    expect(result.content[1]).toEqual({ type: 'tool_use', id: 'toolu_01', name: 'Read', input: { file_path: '/tmp/a.txt' } })
+    expect(result.content[2]).toEqual({ type: 'tool_use', id: 'toolu_02', name: 'Read', input: { file_path: '/tmp/b.txt' } })
+    expect(result.stop_reason).toBe('tool_use')
+  })
+
+  it('handles multiple tool calls without preceding text', () => {
+    const text = '{"type":"tool_use","id":"toolu_01","name":"bash","input":{"command":"ls"}}\n{"type":"tool_use","id":"toolu_02","name":"bash","input":{"command":"pwd"}}'
+    const result = parseAnthropicResponse(text)
+    expect(result.type).toBe('tool_use')
+    expect(result.content).toHaveLength(2)
+    expect(result.content[0].name).toBe('bash')
+    expect(result.content[1].name).toBe('bash')
+  })
 })
 
 describe('toAnthropicResponse', () => {
