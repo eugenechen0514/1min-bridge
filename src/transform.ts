@@ -303,6 +303,78 @@ export function toAnthropicResponse(rawText: string, model: string) {
   }
 }
 
+// ── Anthropic Streaming Events ────────────────────────
+
+export function anthropicStreamEvents(model: string) {
+  const msgId = `msg_${crypto.randomUUID()}`
+
+  return {
+    msgId,
+    messageStart: () => ({
+      event: 'message_start',
+      data: {
+        type: 'message_start',
+        message: {
+          id: msgId,
+          type: 'message',
+          role: 'assistant',
+          model,
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      },
+    }),
+    contentBlockStart: (index: number, type: 'text' | 'tool_use', toolUse?: { id: string; name: string }) => ({
+      event: 'content_block_start',
+      data: {
+        type: 'content_block_start',
+        index,
+        content_block: type === 'text'
+          ? { type: 'text', text: '' }
+          : { type: 'tool_use', id: toolUse!.id, name: toolUse!.name, input: {} },
+      },
+    }),
+    textDelta: (index: number, text: string) => ({
+      event: 'content_block_delta',
+      data: {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'text_delta', text },
+      },
+    }),
+    inputJsonDelta: (index: number, partial_json: string) => ({
+      event: 'content_block_delta',
+      data: {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'input_json_delta', partial_json },
+      },
+    }),
+    contentBlockStop: (index: number) => ({
+      event: 'content_block_stop',
+      data: { type: 'content_block_stop', index },
+    }),
+    messageDelta: (stop_reason: string) => ({
+      event: 'message_delta',
+      data: {
+        type: 'message_delta',
+        delta: { stop_reason, stop_sequence: null },
+        usage: { output_tokens: 0 },
+      },
+    }),
+    messageStop: () => ({
+      event: 'message_stop',
+      data: { type: 'message_stop' },
+    }),
+    ping: () => ({
+      event: 'ping',
+      data: { type: 'ping' },
+    }),
+  }
+}
+
 // ── Responses API ─────────────────────────────────────
 
 /**

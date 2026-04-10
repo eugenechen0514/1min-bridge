@@ -20,6 +20,7 @@ import {
   toAnthropicPrompt,
   parseAnthropicResponse,
   toAnthropicResponse,
+  anthropicStreamEvents,
 } from './transform.js'
 
 describe('messagesToPrompt', () => {
@@ -478,5 +479,42 @@ describe('toAnthropicResponse', () => {
     expect(result.stop_reason).toBe('tool_use')
     expect(result.content[0].type).toBe('tool_use')
     expect(result.content[0].name).toBe('bash')
+  })
+})
+
+describe('anthropicStreamEvents', () => {
+  it('generates message_start event', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const start = events.messageStart()
+    expect(start.event).toBe('message_start')
+    expect(start.data.message.model).toBe('claude-sonnet-4-20250514')
+    expect(start.data.message.role).toBe('assistant')
+  })
+
+  it('generates content_block_start for text', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const block = events.contentBlockStart(0, 'text')
+    expect(block.event).toBe('content_block_start')
+    expect(block.data.content_block.type).toBe('text')
+  })
+
+  it('generates text delta', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const delta = events.textDelta(0, 'Hello')
+    expect(delta.event).toBe('content_block_delta')
+    expect(delta.data.delta.text).toBe('Hello')
+  })
+
+  it('generates message_delta with stop_reason', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const delta = events.messageDelta('end_turn')
+    expect(delta.event).toBe('message_delta')
+    expect(delta.data.delta.stop_reason).toBe('end_turn')
+  })
+
+  it('generates message_stop', () => {
+    const events = anthropicStreamEvents('claude-sonnet-4-20250514')
+    const stop = events.messageStop()
+    expect(stop.event).toBe('message_stop')
   })
 })
