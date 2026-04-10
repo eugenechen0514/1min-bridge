@@ -39,6 +39,12 @@ API_KEY=your-1min-ai-key pnpm dev
 ANTHROPIC_BASE_URL=http://localhost:11434/anthropic claude
 ```
 
+If you changed the port (e.g. `PORT=4444`), adjust the URL accordingly:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4444/anthropic claude
+```
+
 ### Cursor / Continue / OpenAI-compatible clients
 
 Set the base URL to:
