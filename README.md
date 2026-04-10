@@ -65,18 +65,18 @@ The default port `11434` matches Ollama's default, so many clients work without 
 
 ## API Endpoints
 
-| Method | Path | Format |
-|--------|------|--------|
-| GET | `/health` | Health check |
-| GET | `/v1/models` | OpenAI model list |
-| GET | `/api/tags` | Ollama model list |
-| GET | `/anthropic/v1/models` | Anthropic model list |
-| GET | `/anthropic/v1/models/:model_id` | Anthropic model info |
-| POST | `/v1/chat/completions` | OpenAI Chat Completions (streaming SSE + non-streaming) |
-| POST | `/v1/responses` | OpenAI Responses API (streaming SSE + non-streaming) |
-| POST | `/api/chat` | Ollama chat (streaming NDJSON + non-streaming) |
-| POST | `/api/generate` | Ollama generate (streaming NDJSON + non-streaming) |
-| POST | `/anthropic/v1/messages` | Anthropic Messages API (streaming SSE + non-streaming) |
+| Method | Path                             | Format                                                  |
+| ------ | -------------------------------- | ------------------------------------------------------- |
+| GET    | `/health`                        | Health check                                            |
+| GET    | `/v1/models`                     | OpenAI model list                                       |
+| GET    | `/api/tags`                      | Ollama model list                                       |
+| GET    | `/anthropic/v1/models`           | Anthropic model list                                    |
+| GET    | `/anthropic/v1/models/:model_id` | Anthropic model info                                    |
+| POST   | `/v1/chat/completions`           | OpenAI Chat Completions (streaming SSE + non-streaming) |
+| POST   | `/v1/responses`                  | OpenAI Responses API (streaming SSE + non-streaming)    |
+| POST   | `/api/chat`                      | Ollama chat (streaming NDJSON + non-streaming)          |
+| POST   | `/api/generate`                  | Ollama generate (streaming NDJSON + non-streaming)      |
+| POST   | `/anthropic/v1/messages`         | Anthropic Messages API (streaming SSE + non-streaming)  |
 
 ## Usage Examples
 
@@ -130,12 +130,12 @@ curl http://localhost:11434/v1/chat/completions \
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `API_KEY` | -- | 1min.ai API key. Takes priority over request headers. |
-| `PORT` | `11434` | Server port. |
-| `MODEL_MAPPING` | `{}` | JSON string mapping alias names to actual model names. |
-| `DEBUG` | -- | Set to `1` or `true` to log all 1min.ai request/response traffic. |
+| Variable        | Default | Description                                                       |
+| --------------- | ------- | ----------------------------------------------------------------- |
+| `API_KEY`       | --      | 1min.ai API key. Takes priority over request headers.             |
+| `PORT`          | `11434` | Server port.                                                      |
+| `MODEL_MAPPING` | `{}`    | JSON string mapping alias names to actual model names.            |
+| `DEBUG`         | --      | Set to `1` or `true` to log all 1min.ai request/response traffic. |
 
 ### Model Aliasing
 
@@ -164,22 +164,22 @@ The server resolves the API key in this order:
 
 This means you can either set the key once via the environment variable, or pass it per-request from your client.
 
-## Supported Models
+## [Supported Models](https://docs.1min.ai/docs/api/chat-with-ai-api#available-models)
 
 73 models from 10 providers:
 
-| Provider | Models |
-|----------|--------|
-| **OpenAI** | GPT-5.4, GPT-5.2, GPT-5.1, GPT-5, GPT-4o, GPT-4.1, GPT-4 Turbo, GPT-3.5 Turbo, o3, o4-mini, and more |
-| **Anthropic** | Claude Opus 4, Claude Sonnet 4, Claude Haiku 4.5 |
-| **Google** | Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash |
-| **Alibaba** | Qwen 3, Qwen VL, Qwen Plus/Max/Flash |
-| **DeepSeek** | DeepSeek Reasoner, DeepSeek Chat |
-| **Mistral** | Magistral, Ministral, Mistral Small/Medium/Large |
-| **xAI** | Grok 4, Grok 3 |
-| **Perplexity** | Sonar, Sonar Pro, Sonar Deep Research |
-| **Cohere** | Command R |
-| **Meta** | Llama 4, Llama 3.1, Llama 3, Llama 2 |
+| Provider       | Models                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| **OpenAI**     | GPT-5.4, GPT-5.2, GPT-5.1, GPT-5, GPT-4o, GPT-4.1, GPT-4 Turbo, GPT-3.5 Turbo, o3, o4-mini, and more |
+| **Anthropic**  | Claude Opus 4, Claude Sonnet 4, Claude Haiku 4.5                                                     |
+| **Google**     | Gemini 3.1 Pro, Gemini 2.5 Pro, Gemini 2.5 Flash                                                     |
+| **Alibaba**    | Qwen 3, Qwen VL, Qwen Plus/Max/Flash                                                                 |
+| **DeepSeek**   | DeepSeek Reasoner, DeepSeek Chat                                                                     |
+| **Mistral**    | Magistral, Ministral, Mistral Small/Medium/Large                                                     |
+| **xAI**        | Grok 4, Grok 3                                                                                       |
+| **Perplexity** | Sonar, Sonar Pro, Sonar Deep Research                                                                |
+| **Cohere**     | Command R                                                                                            |
+| **Meta**       | Llama 4, Llama 3.1, Llama 3, Llama 2                                                                 |
 
 The full model list is served at `/v1/models`, `/api/tags`, or `/anthropic/v1/models`.
 
