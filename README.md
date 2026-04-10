@@ -1,4 +1,4 @@
-# 1min-openai-api
+# 1min-bridge
 
 A relay server that translates **OpenAI**, **Ollama**, and **Anthropic** compatible API calls into [1min.ai](https://1min.ai) API calls.
 
