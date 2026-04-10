@@ -19,6 +19,7 @@ import {
   anthropicToolsToPrompt,
   toAnthropicPrompt,
   extractAnthropicImages,
+  extractAnthropicDocuments,
   parseAnthropicResponse,
   toAnthropicResponse,
   anthropicStreamEvents,
@@ -104,6 +105,7 @@ describe('toOneMinAiRequest', () => {
       model: 'gpt-4o',
       prompt: 'Hello',
       images: [],
+      files: [],
       webSearch: false,
     })
     expect(result).toEqual({
@@ -120,10 +122,38 @@ describe('toOneMinAiRequest', () => {
       model: 'gpt-4o',
       prompt: 'Describe',
       images: ['https://example.com/img.png'],
+      files: [],
       webSearch: false,
     })
     expect(result.promptObject.attachments).toEqual({
       images: ['https://example.com/img.png'],
+    })
+  })
+
+  it('includes attachments when files present', () => {
+    const result = toOneMinAiRequest({
+      model: 'gpt-4o',
+      prompt: 'Summarize',
+      images: [],
+      files: ['20ad0277-74df-4629-8c50-56a2549acbd7'],
+      webSearch: false,
+    })
+    expect(result.promptObject.attachments).toEqual({
+      files: ['20ad0277-74df-4629-8c50-56a2549acbd7'],
+    })
+  })
+
+  it('includes both images and files in attachments', () => {
+    const result = toOneMinAiRequest({
+      model: 'gpt-4o',
+      prompt: 'Describe',
+      images: ['https://example.com/img.png'],
+      files: ['some-uuid'],
+      webSearch: false,
+    })
+    expect(result.promptObject.attachments).toEqual({
+      images: ['https://example.com/img.png'],
+      files: ['some-uuid'],
     })
   })
 
@@ -132,6 +162,7 @@ describe('toOneMinAiRequest', () => {
       model: 'gpt-4o',
       prompt: 'Latest news',
       images: [],
+      files: [],
       webSearch: true,
     })
     expect(result.promptObject.settings).toEqual({
@@ -352,6 +383,37 @@ describe('extractAnthropicImages', () => {
       { type: 'url', url: 'https://example.com/1.png' },
       { type: 'base64', media_type: 'image/jpeg', data: 'abc123' },
     ])
+  })
+})
+
+describe('extractAnthropicDocuments', () => {
+  it('returns empty array for string content', () => {
+    const messages = [{ role: 'user', content: 'Hello' }]
+    expect(extractAnthropicDocuments(messages)).toEqual([])
+  })
+
+  it('extracts base64 PDF document', () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Summarize this' },
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0x' } },
+      ],
+    }]
+    expect(extractAnthropicDocuments(messages)).toEqual([
+      { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0x' },
+    ])
+  })
+
+  it('ignores non-document blocks', () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Hello' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBOR' } },
+      ],
+    }]
+    expect(extractAnthropicDocuments(messages)).toEqual([])
   })
 })
 

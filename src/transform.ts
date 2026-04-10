@@ -23,6 +23,7 @@ interface OneMinAiRequestInput {
   model: string
   prompt: string
   images: string[]
+  files: string[]
   webSearch: boolean
 }
 
@@ -166,6 +167,29 @@ export function extractAnthropicImages(
   return images
 }
 
+export interface AnthropicDocument {
+  type: 'base64'
+  media_type: string
+  data: string
+}
+
+export function extractAnthropicDocuments(
+  messages: { role: string; content: string | any[] }[],
+): AnthropicDocument[] {
+  const docs: AnthropicDocument[] = []
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue
+    for (const block of msg.content) {
+      if (block.type !== 'document') continue
+      const src = block.source
+      if (src?.type === 'base64') {
+        docs.push({ type: 'base64', media_type: src.media_type, data: src.data })
+      }
+    }
+  }
+  return docs
+}
+
 export function extractImages(messages: Message[]): string[] {
   const urls: string[] = []
   for (const msg of messages) {
@@ -184,15 +208,17 @@ export function extractWebSearch(webSearchOptions: unknown): boolean {
   return webSearchOptions != null
 }
 
-export function toOneMinAiRequest({ model, prompt, images, webSearch }: OneMinAiRequestInput) {
+export function toOneMinAiRequest({ model, prompt, images, files, webSearch }: OneMinAiRequestInput) {
   const promptObject: {
     prompt: string
-    attachments?: { images: string[] }
+    attachments?: { images?: string[]; files?: string[] }
     settings?: { webSearchSettings: { webSearch: boolean } }
   } = { prompt }
 
-  if (images.length > 0) {
-    promptObject.attachments = { images }
+  if (images.length > 0 || files.length > 0) {
+    promptObject.attachments = {}
+    if (images.length > 0) promptObject.attachments.images = images
+    if (files.length > 0) promptObject.attachments.files = files
   }
 
   if (webSearch) {

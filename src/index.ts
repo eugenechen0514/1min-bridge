@@ -3,8 +3,8 @@ import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { serve } from '@hono/node-server'
 import { config, getModelList, resolveModelName, getApiKey } from './config.js'
-import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, extractAnthropicImages, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse, toAnthropicModelList, toAnthropicModelInfo } from './transform.js'
-import { chatWithAi, chatWithAiStream, uploadImageAsset } from './oneminai.js'
+import { messagesToPrompt, extractImages, extractWebSearch, toOneMinAiRequest, fromOneMinAiResponse, toOpenAiResponse, toOpenAiStreamChunk, toOllamaChatResponse, toOllamaChatStreamChunk, toOllamaGenerateResponse, toOllamaGenerateStreamChunk, responsesInputToPrompt, responsesExtractImages, toResponsesApiResponse, responsesStreamEvents, toAnthropicPrompt, extractAnthropicImages, extractAnthropicDocuments, toAnthropicResponse, anthropicStreamEvents, parseAnthropicResponse, toAnthropicModelList, toAnthropicModelInfo } from './transform.js'
+import { chatWithAi, chatWithAiStream, uploadImageAsset, uploadFileAsset } from './oneminai.js'
 
 const app = new Hono()
 
@@ -72,7 +72,7 @@ app.post('/v1/chat/completions', async (c) => {
   const prompt = messagesToPrompt(body.messages)
   const images = extractImages(body.messages)
   const webSearch = extractWebSearch(body.web_search_options)
-  const oneMinReq = toOneMinAiRequest({ model, prompt, images, webSearch })
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images, files: [], webSearch })
 
   // 5. Handle streaming
   if (body.stream) {
@@ -177,7 +177,7 @@ app.post('/api/generate', async (c) => {
 
   const model = resolveModelName(body.model, config.modelMapping)
   const prompt = body.system ? `[System] ${body.system}\n[User] ${body.prompt}` : body.prompt
-  const oneMinReq = toOneMinAiRequest({ model, prompt, images: [], webSearch: false })
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images: [], files: [], webSearch: false })
 
   // Ollama defaults to streaming
   if (body.stream !== false) {
@@ -234,7 +234,7 @@ app.post('/v1/responses', async (c) => {
   const prompt = responsesInputToPrompt(body.input, body.instructions)
   const images = responsesExtractImages(body.input)
   const webSearch = body.tools?.some((t: any) => t.type === 'web_search') ?? false
-  const oneMinReq = toOneMinAiRequest({ model, prompt, images, webSearch })
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images, files: [], webSearch })
 
   // Streaming
   if (body.stream) {
@@ -312,12 +312,18 @@ app.post('/anthropic/v1/messages', async (c) => {
   const model = resolveModelName(body.model, config.modelMapping)
   const prompt = toAnthropicPrompt(body)
   const rawImages = extractAnthropicImages(body.messages ?? [])
-  const images = await Promise.all(
-    rawImages.map((img) =>
-      img.type === 'url' ? img.url : uploadImageAsset(img.data, img.media_type, apiKey),
+  const rawDocs = extractAnthropicDocuments(body.messages ?? [])
+  const [images, files] = await Promise.all([
+    Promise.all(
+      rawImages.map((img) =>
+        img.type === 'url' ? img.url : uploadImageAsset(img.data, img.media_type, apiKey),
+      ),
     ),
-  )
-  const oneMinReq = toOneMinAiRequest({ model, prompt, images, webSearch: false })
+    Promise.all(
+      rawDocs.map((doc) => uploadFileAsset(doc.data, doc.media_type, apiKey)),
+    ),
+  ])
+  const oneMinReq = toOneMinAiRequest({ model, prompt, images, files, webSearch: false })
 
   // Streaming
   if (body.stream) {

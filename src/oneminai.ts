@@ -73,6 +73,40 @@ export async function uploadImageAsset(
   return key
 }
 
+export async function uploadFileAsset(
+  base64Data: string,
+  mediaType: string,
+  apiKey: string,
+): Promise<string> {
+  const ext = mediaType.split('/')[1] || 'bin'
+  const fileName = `upload_${Date.now()}.${ext}`
+
+  const binary = Buffer.from(base64Data, 'base64')
+  const blob = new Blob([binary], { type: mediaType })
+
+  const form = new FormData()
+  form.append('asset', blob, fileName)
+
+  debug('→ POST file asset upload', { fileName, size: binary.length })
+
+  const res = await fetch(ASSET_URL, {
+    method: 'POST',
+    headers: { 'API-KEY': apiKey },
+    body: form,
+  })
+
+  if (!res.ok) {
+    const message = await res.text()
+    debug(`← ${res.status} file asset upload ERROR`, message)
+    throw { status: res.status, message }
+  }
+
+  const data: any = await res.json()
+  const uuid = data?.fileContent?.uuid
+  debug('← file asset upload OK', { uuid })
+  return uuid
+}
+
 // ── Non-streaming ─────────────────────────────────────
 
 export async function chatWithAi(body: OneMinAiRequest, apiKey: string): Promise<any> {
